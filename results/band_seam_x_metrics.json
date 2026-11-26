@@ -1,0 +1,12 @@
+{
+  "direction_deviation_deg_max": 1.526666247102488e-13,
+  "direction_deviation_deg_mean": 3.015637031313557e-14,
+  "direction_deviation_deg_rms": 4.355004964346185e-14,
+  "anisotropy_max": 1.0000000000000069,
+  "anisotropy_mean": 1.0000000000000016,
+  "collapsed_triangle_count": 0,
+  "mean_scale_min": 0.9999999999999977,
+  "mean_scale_max": 1.000000000000003,
+  "seam_count": 304,
+  "seam_gap_fraction_max": 0.4253707913295377
+}

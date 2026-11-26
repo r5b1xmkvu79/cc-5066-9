@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "texorient"
+version = "0.1.0"
+description = "Tangent-bundle surface texture direction field, UV construction and singularity analysis"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "matplotlib>=3.6",
+    "PySide6>=6.5",
+]
+
+[project.scripts]
+texorient = "texorient.app.cli:main"
+
+[tool.setuptools]
+packages = ["texorient", "texorient.core", "texorient.app", "texorient.gui"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
