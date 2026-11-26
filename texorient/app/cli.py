@@ -15,8 +15,12 @@ import sys
 import numpy as np
 
 from ..app.pipeline import (constraints_from_guide, make_mesh, run_pipeline)
+from ..core.editor import FieldEditor, TopologyConflict
+from ..core.field import _face_fan
 from ..core.mesh import TriangleMesh
 from ..core.models import REGISTRY
+from ..core.topology import (FIXED_PRINT, SEAM_MOVES, numbering_mismatches,
+                             seamless_obstructions, transport_around_loop)
 
 # A small library of analytic guides addressable by name from the CLI.
 GUIDES = ["x", "y", "z", "radial", "swirl", "swirl2"]
@@ -81,6 +85,25 @@ def build_parser() -> argparse.ArgumentParser:
                    help="output file base name (default: mesh_method_guide)")
     p.add_argument("--no-overlay", action="store_true",
                    help="omit direction arrows, seams and singularity markers")
+    p.add_argument("--seam-policy", choices=[SEAM_MOVES, FIXED_PRINT],
+                   default=SEAM_MOVES,
+                   help="whether the cut may migrate with a dragged "
+                        "singularity or the printed orientation is frozen")
+    p.add_argument("--drag-edge", type=int, action="append", default=[],
+                   help="interior edge id to drag a singularity across "
+                        "(repeatable); pair with --drag-delta")
+    p.add_argument("--drag-delta", type=int, default=1,
+                   help="integer period jump added per dragged edge")
+    p.add_argument("--seam-edge", type=int, action="append", default=[],
+                   help="interior edge id to mark as a manual seam cut")
+    p.add_argument("--loop-vertex", type=int, default=None,
+                   help="print the closed-loop transport around this vertex")
+    p.add_argument("--check-seamless", action="store_true",
+                   help="report loops/vertices that block a seamless field "
+                        "and the edges a human may cut")
+    p.add_argument("--check-numbering", action="store_true",
+                   help="locate adjacency edges whose integer jump disagrees "
+                        "with the smooth geometric closure")
     return p
 
 
@@ -97,9 +120,60 @@ def main(argv: list[str] | None = None) -> int:
         faces = list(range(0, mesh.n_faces, max(1, args.stride)))
         constraints = constraints_from_guide(
             mesh, guide, faces=faces, weight=args.weight)
+
+        # Optional interactive-topology layer.  The editor holds the integer
+        # edge jumps; after every drag the field is re-solved and the (edited)
+        # constraints/field feed the same render pipeline as an unedited run.
+        editor = FieldEditor(mesh, constraints, mode=args.mode,
+                             policy=args.seam_policy)
+        if args.seam_edge:
+            editor.set_seams(args.seam_edge)
+        for eid in args.drag_edge:
+            editor.drag_singularity(eid, args.drag_delta)
+        constraints = editor.field.constraints
+        field_for_report = editor.field
+
+        if args.loop_vertex is not None:
+            v = args.loop_vertex
+            loop_faces, _, _, closed = _face_fan(mesh, v)
+            if not closed:
+                raise ValueError(
+                    f"vertex {v} is on a boundary; its fan cannot close")
+            loop = transport_around_loop(field_for_report,
+                                         loop_faces + [loop_faces[0]])
+            print(f"loop around vertex {v}: transport "
+                  f"{np.degrees(loop.rotation_rad):+.4f} deg, winding "
+                  f"{loop.winding}, holonomy {loop.holonomy_turns:+.4f} turn")
+        if args.check_seamless:
+            blocks = seamless_obstructions(field_for_report)
+            if not blocks:
+                print("seamless check: no obstruction; all anchors satisfiable "
+                      "without a cut")
+            for i, o in enumerate(blocks, 1):
+                if o.kind == "singular_vertex":
+                    print(f"obstruction {i}: singular vertex {o.vertex} index "
+                          f"{o.index2 / 2.0:+.2f}; cut candidates "
+                          f"{o.candidate_cuts}")
+                else:
+                    print(f"obstruction {i}: loop winding {o.winding:+d}; "
+                          f"cut candidates {o.candidate_cuts}")
+        if args.check_numbering:
+            mismatches = numbering_mismatches(field_for_report)
+            if not mismatches:
+                print("numbering check: no mismatch; geometric closure is "
+                      "smooth on every adjacency edge")
+            for m in mismatches:
+                print(f"numbering jump: edge {m.edge} faces "
+                      f"({m.face0},{m.face1}) {m.periods:+.2f} period(s), "
+                      f"wrap {np.degrees(m.expected_wrap):+.3f} deg")
+
         result = run_pipeline(
             mesh, constraints, mode=args.mode, method=args.method,
-            spacing=args.spacing, subdiv=args.subdiv, pattern=args.pattern)
+            spacing=args.spacing, subdiv=args.subdiv, pattern=args.pattern,
+            dfield=field_for_report if args.drag_edge else None)
+    except TopologyConflict as exc:
+        print(f"texorient: seam policy conflict: {exc}", file=sys.stderr)
+        return 3
     except Exception as exc:
         print(f"texorient: computation failed: {exc}", file=sys.stderr)
         return 2

@@ -117,6 +117,59 @@ def draw_constraints(ax, mesh: TriangleMesh, constraints,
               length=0.18, normalize=False)
 
 
+def draw_anchors(ax, mesh: TriangleMesh, anchors, field=None,
+                 color: str = "lime") -> None:
+    """Draw lockable direction anchors: a square marker plus the locked arrow.
+
+    Anchors use the field's solved frames when available, so a locked
+    reference direction stays queryable and visible after topology edits.
+    """
+    if not anchors:
+        return
+    from ..core.frames import angles_to_vectors, tangent_frames
+    if field is None:
+        n, e1, e2 = tangent_frames(mesh)
+    else:
+        e1, e2 = field.e1, field.e2
+    centers = mesh.face_centers()
+    faces = np.array([a.face for a in anchors])
+    angles = np.array([a.angle for a in anchors])
+    vecs = angles_to_vectors(angles, e1[faces], e2[faces])
+    starts = centers[faces]
+    ax.scatter(starts[:, 0], starts[:, 1], starts[:, 2],
+               c=color, marker="s", s=90, edgecolors="black",
+               depthshade=False, zorder=98, label=f"anchor x{len(anchors)}")
+    ax.quiver(starts[:, 0], starts[:, 1], starts[:, 2],
+              vecs[:, 0], vecs[:, 1], vecs[:, 2],
+              color=color, linewidth=2.0, arrow_length_ratio=0.3,
+              length=0.22, normalize=False, zorder=99)
+
+
+def draw_transport_loop(ax, mesh: TriangleMesh, faces: list[int],
+                        color: str = "gold") -> None:
+    """Draw the dual face-centre path of a closed-loop transport demo."""
+    if len(faces) < 2:
+        return
+    centers = mesh.face_centers()
+    pts = centers[np.asarray(faces, dtype=np.int64)]
+    ax.plot(pts[:, 0], pts[:, 1], pts[:, 2], color=color, linewidth=2.2,
+            zorder=97, label="transport loop")
+
+
+def draw_edges(ax, mesh: TriangleMesh, edge_ids, color: str = "red",
+               lw: float = 1.6, label: str | None = None) -> None:
+    """Highlight arbitrary interior edges (manual seam cuts / mismatches)."""
+    edge_ids = list(edge_ids)
+    if not edge_ids:
+        return
+    segs = [[mesh.vertices[u], mesh.vertices[v]]
+            for u, v in mesh.edges[np.asarray(edge_ids, dtype=np.int64)]]
+    coll = Line3DCollection(segs, colors=color, linewidths=lw, alpha=0.95)
+    ax.add_collection3d(coll)
+    if label:
+        coll.set_label(label)
+
+
 def style_axes(ax, title: str) -> None:
     ax.set_title(title, fontsize=11)
     ax.set_xlabel("x"); ax.set_ylabel("y"); ax.set_zlabel("z")

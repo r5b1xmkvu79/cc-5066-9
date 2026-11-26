@@ -29,19 +29,23 @@ python3 -m texorient.gui.main
 
 ### Workflow
 
-1. **Choose a surface** — cylinder, holed annulus, curved band, filled disk or
-   open cone (top-left *Surface* box).
+1. **Choose a surface** — cylinder, holed annulus, curved band, filled disk,
+   open cone or handled torus (top-left *Surface* box).
 2. **Draw direction constraints** in the 3-D view:
    * left **click a face** to select it, then **drag** in the direction you want
      the texture to run. The drag is projected into that face's tangent plane;
    * or pick a **preset guide** (world X/Y/Z, radial, tangential swirl, 2×
      swirl). The *stride* controls how sparse the guide is.
-3. **Choose the field type** — `line / stripes (mod π)` for stripes and fibres,
+3. **Edit the topology** (the *Direction anchors, singularities and seams* box):
+   switch the click-drag mode to lock a **direction anchor**, drag a
+   **singularity across an edge**, or mark/clear a **seam edge**; choose the
+   seam policy and use the closed-loop / feasibility / numbering buttons.
+4. **Choose the field type** — `line / stripes (mod π)` for stripes and fibres,
    or `vector (mod 2π)`.
-4. **Choose the UV construction method** (see §3):
+5. **Choose the UV construction method** (see §3):
    * `seam` — direction exact, cuts where continuity is impossible;
    * `global` — continuous, sacrifices local direction near singularities.
-5. Press **“Solve field and lay texture”**.
+6. Press **“Solve field and lay texture”**.
 
 ### Result area
 
@@ -122,6 +126,99 @@ while the seam method covers the same cylinder exactly.
 
 ---
 
+## 3a. Interactive topology editing — anchors, singularities and seams
+
+The integer period jump `k_e` on every interior edge is the editable
+topological layer.  The studio (`texorient.gui.main`) exposes it directly, and
+the same operations are available headlessly through
+`texorient.core.editor.FieldEditor`, `texorient.core.topology` and the CLI.
+
+### Lockable direction anchors
+
+A **direction anchor (方向锚)** locks the texture direction on one face.  Switch
+the *click-drag mode* to `lock direction anchor` and click-drag a face; the
+anchor stores both the face id and a **geometric key** (the sorted vertex ids
+of the triangle), so it survives a face renumbering even though the geometry is
+untouched.  The locked reference direction stays queryable as a 3-D vector
+after every later edit (`FieldEditor.anchor_direction_world`).
+
+### Draggable singularities and per-edge jumps
+
+In `drag singularity across edge` mode, a click on a face drags the nearest
+interior edge's singularity across the edge shared by two faces.  One integer
+period jump is added on that edge; the vertex indices are recomputed from the
+signed fan sum (`topology.vertex_indices`), so the change propagates from the
+geometric adjacency to the actual texture orientation.  The total Poincaré
+index is conserved — the charge moves to the edge's two endpoint vertices, it
+is never created or destroyed.  The table `topology.edge_jumps` reports the
+unwrapped jump, the wrapped geometric mismatch and the integer `k` for every
+edge, i.e. the direction jump a brush stroke experiences crossing that edge.
+
+### Two seam policies and the closed-loop conflict
+
+| policy | meaning when a singularity is dragged |
+|---|---|
+| `seam_moves` (缝随奇点迁移) | the crossed edge becomes a seam that absorbs the moved jump; the cut follows the charge |
+| `fixed_print` (已印纹章绝不转向) | an uncut, already printed face may never rotate; a drag across an edge that is not already a seam is refused with a `TopologyConflict` |
+
+When a closed loop carries nonzero winding, a single seamless cover cannot
+satisfy every locked anchor around it.  `FieldEditor.loop_winding_conflicts`
+and `transport_around_loop` report the geometric transport rotation, the
+integer winding and the net holonomy; the editor then offers the loop edges as
+manual cut candidates.  In that conflict **only one of the two constraints can
+be released**: cut a loop edge (seam moves) or free an anchor (fixed print) —
+the fixed-print editor refuses the drag until the edge is cut.
+
+### Cross-seam readback of strokes not used in the fit
+
+`FieldEditor.readback_rotation` takes independent stroke angles (data that did
+not participate in the fit), parallel-transports them around a loop and returns
+both the geometric transport rotation and the *actual* rotation including
+integer jumps.  When the loop crosses a seam bank, that difference is the real
+cross-seam rotation; the locked anchor on the start face is reported as still
+valid exactly when the transported stroke agrees with it modulo one period.
+
+### Seamless feasibility on a handled surface and a holed sheet
+
+`topology.seamless_obstructions` returns every obstruction to a globally
+seamless, all-anchor field, each with the edges a human may cut:
+
+* on the **handled torus**, non-contractible dual loops carry winding and must
+  be cut (alongside any guide-induced singular vertex fans);
+* on a **holed annulus**, a swirl winds around the boundary hole as a
+  non-contractible loop obstruction, while the same swirl on a filled disk
+  concentrates the charge on the centre vertex fan.
+
+### Face renumbering and numbering-jump diagnosis
+
+`topology.renumber_faces` reorders faces by an arbitrary permutation without
+moving a vertex; constraints and anchors are remapped automatically and anchors
+are re-located from their geometric keys.  Re-solving after a clean
+renumbering keeps the geometric closure smooth (no mismatch).  If the
+orientation instead follows the numbering — a whole-period integer jump on an
+edge whose geometric wrap stays small — `topology.numbering_mismatches`
+localises the offending adjacency edge so the seam tool can jump straight to
+it, even though the geometric closed loop remains smooth.
+
+### CLI equivalents
+
+```bash
+# closed-loop transport around vertex 0 plus feasibility and numbering checks
+python3 -m texorient.app.cli --mesh disk --guide swirl2 \
+    --loop-vertex 0 --check-seamless --check-numbering
+
+# fixed print refuses an uncut drag (exit code 3); mark the seam first
+python3 -m texorient.app.cli --mesh disk --guide swirl2 \
+    --seam-policy fixed_print --drag-edge 50
+python3 -m texorient.app.cli --mesh disk --guide swirl2 \
+    --seam-edge 50 --drag-edge 50
+
+# a handled surface: the non-contractible loop obstruction and its cut choices
+python3 -m texorient.app.cli --mesh torus --guide z --check-seamless
+```
+
+---
+
 ## 4. Command line (auxiliary)
 
 The CLI mirrors the same pipeline for scripting and batch rendering; the GUI is
@@ -194,12 +291,15 @@ reused — every UV is rebuilt from the freshly solved field.
 ```
 texorient/
   core/        mesh connectivity, frames/transport, field solver, holonomy,
-               UV construction, metrics, procedural models, stripe renderer
+               UV construction, metrics, procedural models, stripe renderer,
+               topology editing (anchors, edge jumps, loop transport,
+               obstructions, renumbering) and the FieldEditor state
   app/         pipeline.py (shared orchestration), plotting.py, cli.py
   gui/main.py  the graphical texture studio (primary entry point)
 examples/      generate_results.py
-tests/         27 tests: connectivity, transport, field, holonomy, UV,
-               metrics, end-to-end rendering and guide response
+tests/         50 tests: connectivity, transport, field, holonomy, UV,
+               metrics, end-to-end rendering, guide response, the full
+               anchor/singularity/seam/loop/renumbering editor and CLI edits
 results/       generated PNG images and metrics JSON
 docs/          this documentation
 ```

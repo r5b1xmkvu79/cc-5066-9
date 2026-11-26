@@ -144,10 +144,41 @@ def cone(radius: float = 1.2, height: float = 1.6,
     return TriangleMesh(verts, np.array(faces, dtype=np.int64))
 
 
+def torus(major: float = 1.6, minor: float = 0.55,
+          n_theta: int = 48, n_phi: int = 24) -> TriangleMesh:
+    """Closed genus-1 torus: a handled surface with two non-contractible loops.
+
+    ``theta`` runs around the major ring, ``phi`` around the tube.  Both
+    directions wrap periodically, so an editor must cut at least one loop
+    before any globally seamless direction with winding can be laid.
+    """
+    theta = np.linspace(0, 2 * np.pi, n_theta, endpoint=False)
+    phi = np.linspace(0, 2 * np.pi, n_phi, endpoint=False)
+    th, ph = np.meshgrid(theta, phi)
+    rr = major + minor * np.cos(ph)
+    verts = np.column_stack([
+        (rr * np.cos(th)).ravel(),
+        (rr * np.sin(th)).ravel(),
+        (minor * np.sin(ph)).ravel()])
+
+    def vid(i, j):  # tube row i, major col j
+        return i * n_theta + (j % n_theta)
+
+    faces = []
+    for i in range(n_phi):
+        i2 = (i + 1) % n_phi
+        for j in range(n_theta):
+            j2 = (j + 1) % n_theta
+            faces.append((vid(i, j), vid(i, j2), vid(i2, j2)))
+            faces.append((vid(i, j), vid(i2, j2), vid(i2, j)))
+    return TriangleMesh(verts, np.array(faces, dtype=np.int64))
+
+
 REGISTRY = {
     "cylinder": cylinder,
     "annulus": annulus,
     "disk": disk_with_interior,
     "band": curved_band,
     "cone": cone,
+    "torus": torus,
 }

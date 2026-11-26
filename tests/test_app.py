@@ -149,3 +149,62 @@ def test_fibre_pattern_runs():
         mesh, constraints_from_guide(mesh, _axis_guide(mesh, 0)),
         method="seam", pattern="fibre", subdiv=2)
     assert np.isfinite(result.tri_colors).all()
+
+
+# --------------------------------------------------------------------- #
+# Editing-aware CLI surface (headless Agg backend; no Qt involved)
+# --------------------------------------------------------------------- #
+def _cli_argv(tmp_path, **extra):
+    argv = ["--mesh", "disk", "--guide", "swirl2", "--method", "seam",
+            "--outdir", str(tmp_path)]
+    for key, value in extra.items():
+        if value == "":
+            argv.append(key)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                argv += [key, str(item)]
+        else:
+            argv += [key, str(value)]
+    return argv
+
+
+def test_cli_loop_and_seamless_checks_run(tmp_path):
+    from texorient.app.cli import main
+    rc = main(_cli_argv(tmp_path, **{
+        "--loop-vertex": 0, "--check-seamless": "",
+        "--check-numbering": ""}))
+    assert rc == 0
+    assert (tmp_path / "disk_seam_swirl2.png").exists()
+
+
+def test_cli_fixed_print_conflict_returns_distinct_exit(tmp_path):
+    from texorient.app.cli import main
+    edge = next(e for e in range(make_mesh("disk").edges.shape[0])
+                if make_mesh("disk").edge_faces[e, 1] >= 0)
+    rc = main(_cli_argv(tmp_path, **{
+        "--seam-policy": "fixed_print", "--drag-edge": edge}))
+    assert rc == 3
+    # allowing the seam to migrate makes the same drag succeed
+    rc_ok = main(_cli_argv(tmp_path, **{
+        "--seam-policy": "seam_moves", "--drag-edge": edge}))
+    assert rc_ok == 0
+
+
+def test_run_pipeline_accepts_editor_field():
+    from texorient.core.editor import FieldEditor
+    from texorient.core.topology import SEAM_MOVES
+    mesh = make_mesh("disk")
+    guide = np.zeros((mesh.n_faces, 3))
+    c = mesh.face_centers()
+    theta = np.arctan2(c[:, 1], c[:, 0])
+    guide[:, 0], guide[:, 1] = np.cos(2 * theta), np.sin(2 * theta)
+    cons = constraints_from_guide(mesh, guide, weight=40.0)
+    editor = FieldEditor(mesh, cons, mode="line", policy=SEAM_MOVES)
+    edge = next(e for e in range(mesh.edges.shape[0])
+                if mesh.edge_faces[e, 1] >= 0)
+    editor.drag_singularity(edge, 1)
+    result = run_pipeline(mesh, cons, method="seam", subdiv=2,
+                          dfield=editor.field)
+    # the rendered result carries the edited integers
+    assert result.field.period_jump[edge] == editor.field.period_jump[edge]
+    assert np.isfinite(result.tri_colors).all()

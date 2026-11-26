@@ -86,12 +86,19 @@ def run_pipeline(mesh: TriangleMesh,
                  spacing: float = 0.25,
                  subdiv: int = 5,
                  pattern: str = "stripe",
-                 world_scale: float = 1.0) -> PipelineResult:
-    """Solve the field, build UVs, measure and render in one call."""
+                 world_scale: float = 1.0,
+                 dfield: DirectionField | None = None) -> PipelineResult:
+    """Solve the field, build UVs, measure and render in one call.
+
+    When ``dfield`` is supplied (for example by the interactive topology
+    editor after a singularity drag), its integer jumps and solved angles are
+    used directly instead of re-solving from the constraints.
+    """
     if not constraints:
         raise ValueError("add at least one direction constraint before laying "
                          "the texture; a field with no guide has no direction")
-    field = solve_direction_field(mesh, constraints, mode=mode)
+    field = dfield if dfield is not None else solve_direction_field(
+        mesh, constraints, mode=mode)
     if method == "seam":
         uv = build_seam_uv(field, world_scale=world_scale)
     elif method == "global":
